@@ -2,18 +2,37 @@
   "name": "indian-stock-predictor",
   "version": "1.0.0",
   "description": "Comprehensive stock prediction application for Indian market",
+  "main": "test-local.js",
   "scripts": {
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "test:local": "node test-local.js",
+    "test:docker": "node test-docker.js",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "docker:seed": "docker-compose exec backend npm run seed",
+    "docker:test": "docker-compose exec backend npm test",
+    "docker:dev": "docker-compose -f docker-compose.dev.yml up -d",
+    "docker:dev:down": "docker-compose -f docker-compose.dev.yml down",
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
-    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
-    "build": "cd frontend && npm run build",
-    "start": "cd backend && npm start"
+    "seed": "cd backend && npm run seed"
   },
-  "devDependencies": {
-    "concurrently": "^8.2.2"
+  "dependencies": {
+    "axios": "^1.6.2"
   },
-  "keywords": ["stock", "prediction", "indian-market", "vue", "nodejs"],
+  "devDependencies": {},
+  "keywords": [
+    "stock-prediction",
+    "indian-market",
+    "vue",
+    "nodejs",
+    "mongodb",
+    "redis"
+  ],
   "author": "Stock Predictor Team",
-  "license": "MIT"
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }

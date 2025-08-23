@@ -1,0 +1,34 @@
+# Development Docker Compose - Minimal setup for testing
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: stock-predictor-mongodb-dev
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+      MONGO_INITDB_DATABASE: stock-predictor
+    volumes:
+      - ./docker/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    networks:
+      - stock-predictor-network
+
+  # Redis Cache
+  redis:
+    image: redis:7.2-alpine
+    container_name: stock-predictor-redis-dev
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass redis123
+    networks:
+      - stock-predictor-network
+
+networks:
+  stock-predictor-network:
+    driver: bridge

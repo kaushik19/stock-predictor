@@ -1,4 +1,8 @@
 const express = require('express');
+const authRoutes = require('./auth');
+const stockRoutes = require('./stocks');
+const fundamentalRoutes = require('./fundamentals');
+const newsRoutes = require('./news');
 const router = express.Router();
 
 /**
@@ -73,6 +77,8 @@ router.get('/', (req, res) => {
       health: '/health',
       auth: '/api/auth',
       stocks: '/api/stocks',
+      fundamentals: '/api/fundamentals',
+      news: '/api/news',
       recommendations: '/api/recommendations',
       portfolio: '/api/portfolio',
       watchlist: '/api/watchlist'
@@ -149,5 +155,17 @@ router.get('/status', (req, res) => {
     pid: process.pid
   });
 });
+
+// Mount auth routes
+router.use('/auth', authRoutes);
+
+// Mount stock routes
+router.use('/stocks', stockRoutes);
+
+// Mount fundamental data routes
+router.use('/fundamentals', fundamentalRoutes);
+
+// Mount news and sentiment routes
+router.use('/news', newsRoutes);
 
 module.exports = router;
