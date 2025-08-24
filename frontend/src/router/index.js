@@ -60,6 +60,15 @@ const routes = [
       title: 'Watchlist - Indian Stock Predictor',
       requiresAuth: true
     }
+  },
+  {
+    path: '/profile',
+    name: 'Profile',
+    component: () => import('../views/Profile.vue'),
+    meta: {
+      title: 'Profile - Indian Stock Predictor',
+      requiresAuth: true
+    }
   }
 ]
 
