@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { User } = require('../models');
 const { getFromCache } = require('../config/database');
-const { logger } = require('./errorHandler');
+const logger = require('../utils/logger');
 
 /**
  * Authentication middleware to verify JWT tokens

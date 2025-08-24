@@ -2,7 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const Joi = require('joi');
 const { User } = require('../models');
-const { logger } = require('../middleware/errorHandler');
+const logger = require('../utils/logger');
 const { setCache, deleteFromCache } = require('../config/database');
 
 const router = express.Router();

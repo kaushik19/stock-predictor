@@ -1,6 +1,7 @@
 const express = require('express');
 const Joi = require('joi');
 const alphaVantageService = require('../services/alphaVantageService');
+const fundamentalAnalysisService = require('../services/fundamentalAnalysisService');
 const { authenticate, optionalAuth } = require('../middleware/auth');
 const { logger } = require('../middleware/errorHandler');
 
@@ -699,6 +700,162 @@ router.get('/health-score/:symbol', optionalAuth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to calculate health score'
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/fundamentals/analysis/{symbol}:
+ *   get:
+ *     summary: Get comprehensive fundamental analysis
+ *     description: Get detailed fundamental analysis including P/E, P/B, debt-to-equity ratios, peer comparison, growth analysis, and investment recommendation
+ *     tags: [Fundamentals]
+ *     parameters:
+ *       - in: path
+ *         name: symbol
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Stock symbol
+ *       - in: query
+ *         name: exchange
+ *         schema:
+ *           type: string
+ *           enum: [NSE, BSE]
+ *           default: NSE
+ *         description: Stock exchange
+ *       - in: query
+ *         name: sector
+ *         schema:
+ *           type: string
+ *           enum: [Technology, Banking, Energy, Healthcare, Consumer Goods, Industrials, Telecommunications, Utilities, Materials, Real Estate]
+ *           default: Technology
+ *         description: Company sector for peer comparison
+ *     responses:
+ *       200:
+ *         description: Comprehensive fundamental analysis completed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     symbol:
+ *                       type: string
+ *                     companyName:
+ *                       type: string
+ *                     sector:
+ *                       type: string
+ *                     lastUpdated:
+ *                       type: string
+ *                     ratios:
+ *                       type: object
+ *                       description: Financial ratios including P/E, P/B, debt-to-equity, ROE, etc.
+ *                     scores:
+ *                       type: object
+ *                       description: Valuation scores (value, growth, quality, momentum, composite)
+ *                     valuation:
+ *                       type: object
+ *                       description: Overall valuation assessment and fair value estimate
+ *                     growth:
+ *                       type: object
+ *                       description: Growth metrics and trends
+ *                     profitability:
+ *                       type: object
+ *                       description: Profitability analysis and trends
+ *                     financial_health:
+ *                       type: object
+ *                       description: Financial health metrics and risk assessment
+ *                     peer_comparison:
+ *                       type: object
+ *                       description: Comparison with sector benchmarks
+ *                     recommendation:
+ *                       type: object
+ *                       description: Investment recommendation with confidence and reasoning
+ *       400:
+ *         description: Invalid parameters
+ *       404:
+ *         description: Insufficient data for analysis
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/analysis/:symbol', optionalAuth, async (req, res) => {
+  try {
+    const { error, value } = symbolSchema.validate({
+      symbol: req.params.symbol,
+      exchange: req.query.exchange
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: error.details.map(detail => detail.message)
+      });
+    }
+
+    const { symbol, exchange } = value;
+    const sector = req.query.sector || 'Technology';
+
+    // First get the raw fundamental data
+    const fundamentalData = await alphaVantageService.getFundamentalData(symbol, exchange);
+    
+    if (!fundamentalData.overview) {
+      return res.status(404).json({
+        success: false,
+        message: 'Company data not found or insufficient for analysis'
+      });
+    }
+
+    // Prepare company data for analysis
+    const companyData = {
+      symbol: fundamentalData.symbol,
+      name: fundamentalData.overview.Name || fundamentalData.overview.name,
+      ...fundamentalData.overview,
+      ...fundamentalData.derivedMetrics
+    };
+
+    // Perform comprehensive fundamental analysis
+    const analysis = await fundamentalAnalysisService.analyzeFundamentals(companyData, sector);
+
+    res.status(200).json({
+      success: true,
+      data: analysis,
+      metadata: {
+        dataSource: 'Alpha Vantage + Internal Analysis',
+        analysisVersion: '1.0',
+        hasRawData: !!fundamentalData.overview,
+        hasIncomeStatement: !!fundamentalData.incomeStatement,
+        hasBalanceSheet: !!fundamentalData.balanceSheet,
+        hasCashFlow: !!fundamentalData.cashFlow
+      }
+    });
+
+  } catch (error) {
+    logger.error('Error performing fundamental analysis:', error);
+    
+    if (error.message.includes('rate limit')) {
+      return res.status(429).json({
+        success: false,
+        message: 'Rate limit exceeded. Please try again later.'
+      });
+    }
+
+    if (error.message.includes('API key not configured')) {
+      return res.status(503).json({
+        success: false,
+        message: 'Fundamental data service temporarily unavailable'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to perform fundamental analysis'
     });
   }
 });

@@ -1,470 +1,356 @@
 const axios = require('axios');
-const { logger } = require('../middleware/errorHandler');
-const { setCache, getFromCache } = require('../config/database');
+const logger = require('../utils/logger');
 
-/**
- * News and Sentiment Analysis Service
- * Provides financial news fetching and basic sentiment analysis
- */
 class NewsService {
   constructor() {
-    this.newsApiKey = process.env.NEWS_API_KEY;
-    this.newsApiUrl = 'https://newsapi.org/v2';
-    this.cacheTimeout = 1800; // 30 minutes cache for news
+    this.apiKey = process.env.NEWS_API_KEY;
+    this.baseUrl = 'https://newsapi.org/v2';
     this.rateLimitDelay = 1000; // 1 second between requests
     this.lastRequestTime = 0;
-
+    this.cache = new Map();
+    this.cacheTimeout = 15 * 60 * 1000; // 15 minutes
+    
     // Sentiment analysis keywords
-    this.positiveKeywords = [
-      'profit', 'growth', 'increase', 'rise', 'gain', 'positive', 'strong', 'good', 'excellent',
-      'bullish', 'optimistic', 'upgrade', 'buy', 'outperform', 'beat', 'exceed', 'success',
-      'expansion', 'recovery', 'boom', 'surge', 'rally', 'breakthrough', 'milestone',
-      'dividend', 'bonus', 'acquisition', 'merger', 'partnership', 'launch', 'innovation'
+    this.positiveWords = [
+      'gain', 'gains', 'rise', 'rises', 'rising', 'up', 'increase', 'increases', 'increasing',
+      'bull', 'bullish', 'positive', 'growth', 'profit', 'profits', 'strong', 'strength',
+      'surge', 'surges', 'surging', 'rally', 'rallies', 'rallying', 'boom', 'booming',
+      'outperform', 'outperforms', 'outperforming', 'beat', 'beats', 'beating', 'exceed',
+      'exceeds', 'exceeding', 'record', 'high', 'highs', 'peak', 'peaks', 'soar', 'soars',
+      'soaring', 'jump', 'jumps', 'jumping', 'climb', 'climbs', 'climbing', 'advance',
+      'advances', 'advancing', 'breakthrough', 'success', 'successful', 'win', 'wins', 'winning'
+    ];
+    
+    this.negativeWords = [
+      'fall', 'falls', 'falling', 'drop', 'drops', 'dropping', 'decline', 'declines', 'declining',
+      'bear', 'bearish', 'negative', 'loss', 'losses', 'weak', 'weakness', 'crash', 'crashes',
+      'crashing', 'plunge', 'plunges', 'plunging', 'slump', 'slumps', 'slumping', 'tumble',
+      'tumbles', 'tumbling', 'underperform', 'underperforms', 'underperforming', 'miss',
+      'misses', 'missing', 'disappoint', 'disappoints', 'disappointing', 'low', 'lows',
+      'bottom', 'bottoms', 'sink', 'sinks', 'sinking', 'slide', 'slides', 'sliding',
+      'retreat', 'retreats', 'retreating', 'concern', 'concerns', 'worry', 'worries',
+      'fear', 'fears', 'risk', 'risks', 'threat', 'threats', 'problem', 'problems'
     ];
 
-    this.negativeKeywords = [
-      'loss', 'decline', 'decrease', 'fall', 'drop', 'negative', 'weak', 'bad', 'poor',
-      'bearish', 'pessimistic', 'downgrade', 'sell', 'underperform', 'miss', 'disappoint',
-      'crisis', 'recession', 'crash', 'plunge', 'slump', 'concern', 'risk', 'warning',
-      'debt', 'bankruptcy', 'lawsuit', 'scandal', 'fraud', 'investigation', 'penalty'
-    ];
-
-    if (!this.newsApiKey) {
+    if (!this.apiKey) {
       logger.warn('News API key not found. News features will be limited.');
     }
   }
 
-  /**
-   * Rate limiting to avoid overwhelming the API
-   */
-  async rateLimit() {
+  async makeRequest(url, params = {}) {
+    if (!this.apiKey) {
+      throw new Error('News API key not configured');
+    }
+
+    // Rate limiting
     const now = Date.now();
     const timeSinceLastRequest = now - this.lastRequestTime;
-    
     if (timeSinceLastRequest < this.rateLimitDelay) {
-      await new Promise(resolve => 
-        setTimeout(resolve, this.rateLimitDelay - timeSinceLastRequest)
-      );
+      await new Promise(resolve => setTimeout(resolve, this.rateLimitDelay - timeSinceLastRequest));
     }
-    
     this.lastRequestTime = Date.now();
-  }
-
-  /**
-   * Get general financial news
-   * @param {Object} options - Search options
-   * @returns {Array} Array of news articles
-   */
-  async getFinancialNews(options = {}) {
-    if (!this.newsApiKey) {
-      throw new Error('News API key not configured');
-    }
 
     try {
-      await this.rateLimit();
-
-      const {
-        category = 'business',
-        country = 'in',
-        pageSize = 20,
-        page = 1
-      } = options;
-
-      const cacheKey = `news_general_${category}_${country}_${page}_${pageSize}`;
-      
-      // Check cache first
-      const cachedData = await getFromCache(cacheKey);
-      if (cachedData) {
-        logger.debug('Cache hit for general financial news');
-        return cachedData;
-      }
-
-      const params = {
-        category,
-        country,
-        pageSize,
-        page,
-        apiKey: this.newsApiKey
-      };
-
-      const response = await axios.get(`${this.newsApiUrl}/top-headlines`, {
-        params,
+      const response = await axios.get(url, {
+        params: {
+          ...params,
+          apiKey: this.apiKey
+        },
         timeout: 10000
       });
 
-      if (response.data.status !== 'ok') {
-        throw new Error(`News API Error: ${response.data.message || 'Unknown error'}`);
+      if (response.data.status === 'error') {
+        throw new Error(response.data.message || 'News API error');
       }
 
-      const articles = response.data.articles || [];
-      const processedArticles = articles.map(article => this.processArticle(article));
-      
-      // Cache the result
-      await setCache(cacheKey, processedArticles, this.cacheTimeout);
-      
-      logger.info(`Fetched ${processedArticles.length} general financial news articles`);
-      return processedArticles;
-
+      return response.data;
     } catch (error) {
-      logger.error('Error fetching financial news:', error.message);
-      throw new Error(`Failed to fetch financial news: ${error.message}`);
-    }
-  }
-
-  /**
-   * Search for news articles by query
-   * @param {string} query - Search query
-   * @param {Object} options - Search options
-   * @returns {Array} Array of news articles
-   */
-  async searchNews(query, options = {}) {
-    if (!this.newsApiKey) {
-      throw new Error('News API key not configured');
-    }
-
-    try {
-      await this.rateLimit();
-
-      const {
-        sortBy = 'publishedAt',
-        pageSize = 20,
-        page = 1,
-        language = 'en',
-        from = null,
-        to = null
-      } = options;
-
-      const cacheKey = `news_search_${encodeURIComponent(query)}_${sortBy}_${page}_${pageSize}`;
-      
-      // Check cache first
-      const cachedData = await getFromCache(cacheKey);
-      if (cachedData) {
-        logger.debug(`Cache hit for news search: ${query}`);
-        return cachedData;
+      if (error.response?.status === 429) {
+        throw new Error('News API rate limit exceeded. Please try again later.');
       }
-
-      const params = {
-        q: query,
-        sortBy,
-        pageSize,
-        page,
-        language,
-        apiKey: this.newsApiKey
-      };
-
-      if (from) params.from = from;
-      if (to) params.to = to;
-
-      const response = await axios.get(`${this.newsApiUrl}/everything`, {
-        params,
-        timeout: 10000
-      });
-
-      if (response.data.status !== 'ok') {
-        throw new Error(`News API Error: ${response.data.message || 'Unknown error'}`);
-      }
-
-      const articles = response.data.articles || [];
-      const processedArticles = articles.map(article => this.processArticle(article));
-      
-      // Cache the result
-      await setCache(cacheKey, processedArticles, this.cacheTimeout);
-      
-      logger.info(`Found ${processedArticles.length} articles for query: ${query}`);
-      return processedArticles;
-
-    } catch (error) {
-      logger.error(`Error searching news for '${query}':`, error.message);
-      throw new Error(`Failed to search news: ${error.message}`);
-    }
-  }
-
-  /**
-   * Get news for a specific stock
-   * @param {string} symbol - Stock symbol
-   * @param {string} companyName - Company name
-   * @param {Object} options - Search options
-   * @returns {Array} Array of news articles
-   */
-  async getStockNews(symbol, companyName, options = {}) {
-    try {
-      const {
-        pageSize = 10,
-        days = 7
-      } = options;
-
-      // Create search queries for the stock
-      const queries = [
-        `"${companyName}"`,
-        `"${symbol}"`,
-        `${companyName} stock`,
-        `${companyName} share price`
-      ];
-
-      // Calculate date range
-      const to = new Date().toISOString();
-      const from = new Date(Date.now() - (days * 24 * 60 * 60 * 1000)).toISOString();
-
-      const allArticles = [];
-      const seenUrls = new Set();
-
-      // Search with different queries and combine results
-      for (const query of queries) {
-        try {
-          const articles = await this.searchNews(query, {
-            pageSize: Math.ceil(pageSize / queries.length),
-            from,
-            to,
-            sortBy: 'publishedAt'
-          });
-
-          // Filter out duplicates and add to results
-          articles.forEach(article => {
-            if (!seenUrls.has(article.url)) {
-              seenUrls.add(article.url);
-              allArticles.push({
-                ...article,
-                relevanceScore: this.calculateRelevanceScore(article, symbol, companyName)
-              });
-            }
-          });
-        } catch (error) {
-          logger.warn(`Failed to fetch news for query '${query}':`, error.message);
-        }
-      }
-
-      // Sort by relevance and recency, then limit results
-      const sortedArticles = allArticles
-        .sort((a, b) => {
-          // First sort by relevance score
-          if (b.relevanceScore !== a.relevanceScore) {
-            return b.relevanceScore - a.relevanceScore;
-          }
-          // Then by publish date
-          return new Date(b.publishedAt) - new Date(a.publishedAt);
-        })
-        .slice(0, pageSize);
-
-      logger.info(`Found ${sortedArticles.length} relevant articles for ${symbol}`);
-      return sortedArticles;
-
-    } catch (error) {
-      logger.error(`Error fetching stock news for ${symbol}:`, error.message);
       throw error;
     }
   }
 
-  /**
-   * Get trending stocks based on news frequency
-   * @param {Array} stockList - List of stocks to analyze
-   * @param {Object} options - Analysis options
-   * @returns {Array} Array of trending stocks with news counts
-   */
-  async getTrendingStocks(stockList, options = {}) {
+  getCacheKey(method, params) {
+    return `${method}_${JSON.stringify(params)}`;
+  }
+
+  getFromCache(key) {
+    const cached = this.cache.get(key);
+    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+      return cached.data;
+    }
+    this.cache.delete(key);
+    return null;
+  }
+
+  setCache(key, data) {
+    this.cache.set(key, {
+      data,
+      timestamp: Date.now()
+    });
+  }
+
+  async getFinancialNews(options = {}) {
+    const {
+      page = 1,
+      pageSize = 20,
+      category = 'business',
+      language = 'en',
+      sortBy = 'publishedAt'
+    } = options;
+
+    const cacheKey = this.getCacheKey('financial', { page, pageSize, category, language, sortBy });
+    const cached = this.getFromCache(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     try {
-      const {
-        days = 1,
-        minArticles = 3
-      } = options;
+      const url = `${this.baseUrl}/top-headlines`;
+      const params = {
+        category,
+        language,
+        pageSize: Math.min(pageSize, 100),
+        page,
+        sortBy
+      };
 
+      // Add country for better Indian market coverage
+      if (language === 'en') {
+        params.country = 'in';
+      }
+
+      const data = await this.makeRequest(url, params);
+      const articles = this.processArticles(data.articles || []);
+      
+      this.setCache(cacheKey, articles);
+      logger.info(`Fetched ${articles.length} financial news articles`);
+      
+      return articles;
+    } catch (error) {
+      logger.error('Error fetching financial news:', error);
+      throw error;
+    }
+  }
+
+  async searchNews(query, options = {}) {
+    const {
+      page = 1,
+      pageSize = 20,
+      sortBy = 'publishedAt',
+      language = 'en'
+    } = options;
+
+    const cacheKey = this.getCacheKey('search', { query, page, pageSize, sortBy, language });
+    const cached = this.getFromCache(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    try {
+      const url = `${this.baseUrl}/everything`;
+      const params = {
+        q: query,
+        language,
+        pageSize: Math.min(pageSize, 100),
+        page,
+        sortBy,
+        domains: 'economictimes.indiatimes.com,moneycontrol.com,business-standard.com,livemint.com,financialexpress.com'
+      };
+
+      const data = await this.makeRequest(url, params);
+      const articles = this.processArticles(data.articles || []);
+      
+      this.setCache(cacheKey, articles);
+      logger.info(`Found ${articles.length} articles for query: ${query}`);
+      
+      return articles;
+    } catch (error) {
+      logger.error('Error searching news:', error);
+      throw error;
+    }
+  }
+
+  async getStockNews(symbol, companyName, options = {}) {
+    const {
+      page = 1,
+      pageSize = 20,
+      days = 7
+    } = options;
+
+    const fromDate = new Date();
+    fromDate.setDate(fromDate.getDate() - days);
+    
+    const query = `"${companyName}" OR "${symbol}" stock market India`;
+    
+    const cacheKey = this.getCacheKey('stock', { symbol, companyName, page, pageSize, days });
+    const cached = this.getFromCache(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    try {
+      const url = `${this.baseUrl}/everything`;
+      const params = {
+        q: query,
+        language: 'en',
+        pageSize: Math.min(pageSize, 50),
+        page,
+        sortBy: 'publishedAt',
+        from: fromDate.toISOString().split('T')[0],
+        domains: 'economictimes.indiatimes.com,moneycontrol.com,business-standard.com,livemint.com,financialexpress.com,reuters.com,bloomberg.com'
+      };
+
+      const data = await this.makeRequest(url, params);
+      let articles = this.processArticles(data.articles || []);
+      
+      // Calculate relevance score for each article
+      articles = articles.map(article => {
+        const relevanceScore = this.calculateRelevanceScore(article, symbol, companyName);
+        return {
+          ...article,
+          relevanceScore
+        };
+      });
+      
+      // Sort by relevance score
+      articles.sort((a, b) => b.relevanceScore - a.relevanceScore);
+      
+      this.setCache(cacheKey, articles);
+      logger.info(`Found ${articles.length} articles for ${symbol} (${companyName})`);
+      
+      return articles;
+    } catch (error) {
+      logger.error(`Error fetching stock news for ${symbol}:`, error);
+      throw error;
+    }
+  }
+
+  async getTrendingStocks(stocks, options = {}) {
+    const {
+      days = 1,
+      minArticles = 5
+    } = options;
+
+    try {
       const trendingData = [];
-      const from = new Date(Date.now() - (days * 24 * 60 * 60 * 1000)).toISOString();
-      const to = new Date().toISOString();
-
-      // Analyze news frequency for each stock
-      for (const stock of stockList) {
+      
+      for (const stock of stocks) {
         try {
-          const articles = await this.searchNews(`"${stock.symbol}" OR "${stock.name}"`, {
-            pageSize: 100,
-            from,
-            to,
-            sortBy: 'publishedAt'
+          const articles = await this.getStockNews(stock.symbol, stock.name, { 
+            pageSize: 50, 
+            days 
           });
-
-          const relevantArticles = articles.filter(article => 
-            this.calculateRelevanceScore(article, stock.symbol, stock.name) > 0.3
-          );
-
-          if (relevantArticles.length >= minArticles) {
-            const sentimentAnalysis = this.analyzeSentiment(relevantArticles);
+          
+          if (articles.length >= minArticles) {
+            const sentiment = this.analyzeSentiment(articles);
+            const trendingScore = this.calculateTrendingScore(articles, sentiment);
             
             trendingData.push({
               symbol: stock.symbol,
               name: stock.name,
-              articleCount: relevantArticles.length,
-              sentiment: sentimentAnalysis,
-              trendingScore: this.calculateTrendingScore(relevantArticles, sentimentAnalysis),
-              latestArticle: relevantArticles[0] || null
+              articleCount: articles.length,
+              sentiment,
+              trendingScore,
+              latestArticle: articles[0] || null
             });
           }
         } catch (error) {
-          logger.warn(`Failed to analyze trending for ${stock.symbol}:`, error.message);
+          logger.warn(`Error fetching news for ${stock.symbol}:`, error.message);
         }
       }
-
+      
       // Sort by trending score
-      const sortedTrending = trendingData
-        .sort((a, b) => b.trendingScore - a.trendingScore)
-        .slice(0, 20); // Top 20 trending stocks
-
-      logger.info(`Identified ${sortedTrending.length} trending stocks`);
-      return sortedTrending;
-
+      trendingData.sort((a, b) => b.trendingScore - a.trendingScore);
+      
+      logger.info(`Analyzed ${trendingData.length} trending stocks`);
+      return trendingData;
     } catch (error) {
-      logger.error('Error analyzing trending stocks:', error.message);
+      logger.error('Error analyzing trending stocks:', error);
       throw error;
     }
   }
 
-  /**
-   * Process a raw news article
-   * @param {Object} article - Raw article from News API
-   * @returns {Object} Processed article
-   */
-  processArticle(article) {
-    const processed = {
-      title: article.title,
-      description: article.description,
-      content: article.content,
-      url: article.url,
-      urlToImage: article.urlToImage,
-      publishedAt: article.publishedAt,
-      source: {
-        id: article.source?.id,
-        name: article.source?.name
-      },
-      author: article.author
-    };
+  async getMarketSentiment(options = {}) {
+    const { days = 1 } = options;
+    
+    const cacheKey = this.getCacheKey('market_sentiment', { days });
+    const cached = this.getFromCache(cacheKey);
+    if (cached) {
+      return cached;
+    }
 
-    // Add sentiment analysis
-    processed.sentiment = this.analyzeSentiment([processed]);
-
-    return processed;
+    try {
+      const query = 'Indian stock market OR NSE OR BSE OR Sensex OR Nifty';
+      const articles = await this.searchNews(query, { pageSize: 100 });
+      
+      const sentiment = this.analyzeSentiment(articles);
+      const result = {
+        sentiment,
+        articleCount: articles.length,
+        timeframe: `${days} day${days > 1 ? 's' : ''}`,
+        lastUpdated: new Date().toISOString(),
+        topArticles: articles.slice(0, 5)
+      };
+      
+      this.setCache(cacheKey, result);
+      logger.info(`Analyzed market sentiment from ${articles.length} articles`);
+      
+      return result;
+    } catch (error) {
+      logger.error('Error analyzing market sentiment:', error);
+      throw error;
+    }
   }
 
-  /**
-   * Calculate relevance score for an article
-   * @param {Object} article - News article
-   * @param {string} symbol - Stock symbol
-   * @param {string} companyName - Company name
-   * @returns {number} Relevance score (0-1)
-   */
+  processArticles(articles) {
+    return articles
+      .filter(article => article && article.title && article.title !== '[Removed]')
+      .map(article => {
+        const sentiment = this.analyzeSentiment([article]);
+        return {
+          title: article.title,
+          description: article.description || '',
+          url: article.url,
+          source: article.source?.name || 'Unknown',
+          publishedAt: article.publishedAt,
+          urlToImage: article.urlToImage,
+          content: article.content,
+          sentiment
+        };
+      });
+  }
+
   calculateRelevanceScore(article, symbol, companyName) {
     let score = 0;
-    const text = `${article.title} ${article.description} ${article.content || ''}`.toLowerCase();
+    const text = `${article.title} ${article.description || ''} ${article.content || ''}`.toLowerCase();
     
     // Check for exact symbol match
     if (text.includes(symbol.toLowerCase())) {
-      score += 0.4;
+      score += 10;
     }
-
+    
     // Check for company name match
     const companyWords = companyName.toLowerCase().split(' ');
-    const matchedWords = companyWords.filter(word => 
-      word.length > 2 && text.includes(word)
-    );
-    score += (matchedWords.length / companyWords.length) * 0.4;
-
-    // Check for financial keywords
-    const financialKeywords = ['stock', 'share', 'price', 'market', 'trading', 'investor', 'earnings', 'revenue'];
-    const financialMatches = financialKeywords.filter(keyword => text.includes(keyword));
-    score += (financialMatches.length / financialKeywords.length) * 0.2;
-
-    return Math.min(score, 1);
-  }
-
-  /**
-   * Analyze sentiment of articles
-   * @param {Array} articles - Array of articles
-   * @returns {Object} Sentiment analysis results
-   */
-  analyzeSentiment(articles) {
-    if (!articles || articles.length === 0) {
-      return {
-        overall: 'neutral',
-        score: 0,
-        positive: 0,
-        negative: 0,
-        neutral: 0,
-        confidence: 0
-      };
-    }
-
-    let totalPositive = 0;
-    let totalNegative = 0;
-    let totalNeutral = 0;
-
-    articles.forEach(article => {
-      const text = `${article.title} ${article.description} ${article.content || ''}`.toLowerCase();
-      
-      let positiveCount = 0;
-      let negativeCount = 0;
-
-      // Count positive keywords
-      this.positiveKeywords.forEach(keyword => {
-        const regex = new RegExp(`\\b${keyword}\\b`, 'gi');
-        const matches = text.match(regex);
-        if (matches) {
-          positiveCount += matches.length;
-        }
-      });
-
-      // Count negative keywords
-      this.negativeKeywords.forEach(keyword => {
-        const regex = new RegExp(`\\b${keyword}\\b`, 'gi');
-        const matches = text.match(regex);
-        if (matches) {
-          negativeCount += matches.length;
-        }
-      });
-
-      // Classify article sentiment
-      if (positiveCount > negativeCount) {
-        totalPositive++;
-      } else if (negativeCount > positiveCount) {
-        totalNegative++;
-      } else {
-        totalNeutral++;
+    companyWords.forEach(word => {
+      if (word.length > 2 && text.includes(word)) {
+        score += 5;
       }
     });
-
-    const total = articles.length;
-    const positiveRatio = totalPositive / total;
-    const negativeRatio = totalNegative / total;
-    const neutralRatio = totalNeutral / total;
-
-    // Calculate overall sentiment
-    let overall = 'neutral';
-    let score = 0;
-
-    if (positiveRatio > negativeRatio && positiveRatio > 0.4) {
-      overall = 'positive';
-      score = positiveRatio - negativeRatio;
-    } else if (negativeRatio > positiveRatio && negativeRatio > 0.4) {
-      overall = 'negative';
-      score = negativeRatio - positiveRatio;
-    }
-
-    // Calculate confidence based on the difference between positive and negative
-    const confidence = Math.abs(positiveRatio - negativeRatio);
-
-    return {
-      overall,
-      score: Math.round(score * 100) / 100,
-      positive: Math.round(positiveRatio * 100),
-      negative: Math.round(negativeRatio * 100),
-      neutral: Math.round(neutralRatio * 100),
-      confidence: Math.round(confidence * 100),
-      totalArticles: total
-    };
+    
+    // Check for stock market related terms
+    const stockTerms = ['stock', 'share', 'market', 'trading', 'investor', 'investment'];
+    stockTerms.forEach(term => {
+      if (text.includes(term)) {
+        score += 2;
+      }
+    });
+    
+    return score;
   }
 
-  /**
-   * Calculate trending score based on article count and sentiment
-   * @param {Array} articles - Array of articles
-   * @param {Object} sentiment - Sentiment analysis results
-   * @returns {number} Trending score
-   */
   calculateTrendingScore(articles, sentiment) {
     const articleCount = articles.length;
     const recencyBonus = this.calculateRecencyBonus(articles);
@@ -482,11 +368,6 @@ class NewsService {
     return Math.round(finalScore * 100) / 100;
   }
 
-  /**
-   * Calculate recency bonus for articles
-   * @param {Array} articles - Array of articles
-   * @returns {number} Recency bonus (0-1)
-   */
   calculateRecencyBonus(articles) {
     if (!articles || articles.length === 0) return 0;
 
@@ -508,11 +389,6 @@ class NewsService {
     return totalRecencyScore / articles.length;
   }
 
-  /**
-   * Get sentiment multiplier for trending score
-   * @param {Object} sentiment - Sentiment analysis results
-   * @returns {number} Sentiment multiplier
-   */
   getSentimentMultiplier(sentiment) {
     if (sentiment.overall === 'positive') {
       return 1 + (sentiment.confidence / 100) * 0.5; // Up to 1.5x for strong positive
@@ -522,83 +398,133 @@ class NewsService {
     return 1; // Neutral sentiment doesn't affect trending score
   }
 
-  /**
-   * Get market sentiment overview
-   * @param {Object} options - Analysis options
-   * @returns {Object} Market sentiment overview
-   */
-  async getMarketSentiment(options = {}) {
-    try {
-      const {
-        days = 1,
-        pageSize = 100
-      } = options;
+  analyzeSentiment(articles) {
+    if (!articles || articles.length === 0) {
+      return {
+        overall: 'neutral',
+        score: 0,
+        positive: 0,
+        negative: 0,
+        neutral: 100,
+        confidence: 0,
+        totalArticles: 0
+      };
+    }
 
-      const from = new Date(Date.now() - (days * 24 * 60 * 60 * 1000)).toISOString();
-      const to = new Date().toISOString();
+    let totalScore = 0;
+    let positiveCount = 0;
+    let negativeCount = 0;
+    let neutralCount = 0;
 
-      // Search for general market news
-      const marketQueries = [
-        'Indian stock market',
-        'NSE BSE',
-        'Sensex Nifty',
-        'Indian economy',
-        'stock market India'
-      ];
+    articles.forEach(article => {
+      const text = `${article.title || ''} ${article.description || ''} ${article.content || ''}`.toLowerCase();
+      let articleScore = 0;
 
-      const allArticles = [];
-      const seenUrls = new Set();
+      // Count positive words
+      this.positiveWords.forEach(word => {
+        const matches = (text.match(new RegExp(word, 'g')) || []).length;
+        articleScore += matches;
+      });
 
-      for (const query of marketQueries) {
-        try {
-          const articles = await this.searchNews(query, {
-            pageSize: Math.ceil(pageSize / marketQueries.length),
-            from,
-            to,
-            sortBy: 'publishedAt'
-          });
+      // Count negative words
+      this.negativeWords.forEach(word => {
+        const matches = (text.match(new RegExp(word, 'g')) || []).length;
+        articleScore -= matches;
+      });
 
-          articles.forEach(article => {
-            if (!seenUrls.has(article.url)) {
-              seenUrls.add(article.url);
-              allArticles.push(article);
-            }
-          });
-        } catch (error) {
-          logger.warn(`Failed to fetch market news for query '${query}':`, error.message);
-        }
+      // Normalize score based on text length
+      const textLength = text.split(' ').length;
+      if (textLength > 0) {
+        articleScore = articleScore / Math.sqrt(textLength) * 100;
       }
 
-      const sentiment = this.analyzeSentiment(allArticles);
-      
-      return {
-        sentiment,
-        articleCount: allArticles.length,
-        timeframe: `${days} day${days > 1 ? 's' : ''}`,
-        lastUpdated: new Date().toISOString(),
-        topArticles: allArticles
-          .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))
-          .slice(0, 5)
-      };
+      totalScore += articleScore;
 
-    } catch (error) {
-      logger.error('Error analyzing market sentiment:', error.message);
-      throw error;
+      // Classify article sentiment
+      if (articleScore > 0.5) {
+        positiveCount++;
+      } else if (articleScore < -0.5) {
+        negativeCount++;
+      } else {
+        neutralCount++;
+      }
+    });
+
+    const averageScore = totalScore / articles.length;
+    const positivePercentage = Math.round((positiveCount / articles.length) * 100);
+    const negativePercentage = Math.round((negativeCount / articles.length) * 100);
+    const neutralPercentage = 100 - positivePercentage - negativePercentage;
+
+    // Determine overall sentiment
+    let overall = 'neutral';
+    if (averageScore > 0.5) {
+      overall = 'positive';
+    } else if (averageScore < -0.5) {
+      overall = 'negative';
     }
+
+    // Calculate confidence based on the distribution
+    const maxPercentage = Math.max(positivePercentage, negativePercentage, neutralPercentage);
+    const confidence = Math.round(maxPercentage);
+
+    return {
+      overall,
+      score: Math.round(averageScore * 100) / 100,
+      positive: positivePercentage,
+      negative: negativePercentage,
+      neutral: neutralPercentage,
+      confidence,
+      totalArticles: articles.length
+    };
   }
 
-  /**
-   * Get API usage statistics
-   * @returns {Object} API usage info
-   */
+  processArticle(article) {
+    if (!article || !article.title || article.title === '[Removed]') {
+      return null;
+    }
+
+    const sentiment = this.analyzeSentiment([article]);
+    return {
+      title: article.title,
+      description: article.description || '',
+      url: article.url,
+      source: {
+        id: article.source?.id || null,
+        name: article.source?.name || 'Unknown'
+      },
+      publishedAt: article.publishedAt,
+      urlToImage: article.urlToImage,
+      content: article.content,
+      author: article.author,
+      sentiment
+    };
+  }
+
   getApiUsage() {
     return {
-      hasApiKey: !!this.newsApiKey,
+      hasApiKey: !!this.apiKey,
       rateLimitDelay: this.rateLimitDelay,
       lastRequestTime: this.lastRequestTime,
-      positiveKeywordsCount: this.positiveKeywords.length,
-      negativeKeywordsCount: this.negativeKeywords.length
+      positiveKeywordsCount: this.positiveWords.length,
+      negativeKeywordsCount: this.negativeWords.length
     };
+  }
+
+  getApiStatus() {
+    return {
+      hasApiKey: !!this.apiKey,
+      status: this.apiKey ? 'configured' : 'not configured',
+      rateLimitDelay: this.rateLimitDelay,
+      cacheSize: this.cache.size,
+      lastRequestTime: this.lastRequestTime
+    };
+  }
+
+  clearCache() {
+    if (this.cache) {
+      this.cache.clear();
+      logger.info('News service cache cleared');
+    }
   }
 }
 

@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const redis = require('redis');
-const { logger } = require('../middleware/errorHandler');
+const logger = require('../utils/logger');
 
 // MongoDB connection
 const connectMongoDB = async () => {

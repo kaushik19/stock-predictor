@@ -47,20 +47,6 @@ app.get('/expert-only', authenticate, authorizeByExperience(['expert']), (req, r
   });
 });
 
-// Test database connection
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/stock-predictor-test';
-
-beforeAll(async () => {
-  await mongoose.connect(MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  });
-});
-
-afterAll(async () => {
-  await mongoose.connection.close();
-});
-
 beforeEach(async () => {
   // Clean up test data before each test
   await User.deleteMany({});

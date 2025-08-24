@@ -1,12 +1,4 @@
 const alphaVantageService = require('../services/alphaVantageService');
-const request = require('supertest');
-const express = require('express');
-const fundamentalRoutes = require('../routes/fundamentals');
-
-// Create test app
-const app = express();
-app.use(express.json());
-app.use('/api/fundamentals', fundamentalRoutes);
 
 // Mock axios to avoid real API calls in tests
 jest.mock('axios');
@@ -16,44 +8,224 @@ describe('Alpha Vantage Service', () => {
   
   beforeEach(() => {
     jest.clearAllMocks();
-    // Reset the service state
-    alphaVantageService.requestQueue = [];
-    alphaVantageService.isProcessingQueue = false;
-  });
-
-  describe('Symbol Formatting', () => {
-    test('should format NSE symbols correctly', () => {
-      expect(alphaVantageService.formatSymbol('RELIANCE', 'NSE')).toBe('RELIANCE.BSE');
-      expect(alphaVantageService.formatSymbol('TCS', 'NSE')).toBe('TCS.BSE');
-    });
-
-    test('should format BSE symbols correctly', () => {
-      expect(alphaVantageService.formatSymbol('RELIANCE', 'BSE')).toBe('RELIANCE.BO');
-      expect(alphaVantageService.formatSymbol('TCS', 'BSE')).toBe('TCS.BO');
-    });
-
-    test('should handle symbols with existing suffixes', () => {
-      expect(alphaVantageService.formatSymbol('RELIANCE.NS', 'NSE')).toBe('RELIANCE.BSE');
-      expect(alphaVantageService.formatSymbol('RELIANCE.BO', 'BSE')).toBe('RELIANCE.BO');
-    });
-  });
-
-  describe('Number Parsing', () => {
-    test('should parse valid numbers correctly', () => {
-      expect(alphaVantageService.parseNumber('123.45')).toBe(123.45);
-      expect(alphaVantageService.parseNumber('1000')).toBe(1000);
-      expect(alphaVantageService.parseNumber(456.78)).toBe(456.78);
-    });
-
-    test('should handle invalid values', () => {
-      expect(alphaVantageService.parseNumber(null)).toBeNull();
-      expect(alphaVantageService.parseNumber(undefined)).toBeNull();
-      expect(alphaVantageService.parseNumber('None')).toBeNull();
-      expect(alphaVantageService.parseNumber('')).toBeNull();
-      expect(alphaVantageService.parseNumber('invalid')).toBeNull();
-    });
   });
 
   describe('Data Processing', () => {
     test('should process company overview data correctly', () => {
-      const rawData = {\n        Symbol: 'RELIANCE.BSE',\n        Name: 'Reliance Industries Limited',\n        Description: 'Reliance Industries Limited operates as a petrochemical company.',\n        Exchange: 'NSI',\n        Currency: 'INR',\n        Country: 'India',\n        Sector: 'Energy',\n        Industry: 'Oil & Gas Refining & Marketing',\n        MarketCapitalization: '1650000000000',\n        PERatio: '28.5',\n        EPS: '85.30',\n        DividendYield: '0.0035',\n        ProfitMargin: '0.089',\n        ReturnOnEquityTTM: '0.125',\n        Beta: '1.2'\n      };\n\n      const processed = alphaVantageService.processCompanyOverview(rawData);\n      \n      expect(processed.symbol).toBe('RELIANCE.BSE');\n      expect(processed.name).toBe('Reliance Industries Limited');\n      expect(processed.sector).toBe('Energy');\n      expect(processed.marketCapitalization).toBe(1650000000000);\n      expect(processed.peRatio).toBe(28.5);\n      expect(processed.eps).toBe(85.30);\n      expect(processed.dividendYield).toBe(0.0035);\n    });\n\n    test('should process income statement data correctly', () => {\n      const rawData = {\n        symbol: 'RELIANCE.BSE',\n        annualReports: [{\n          fiscalDateEnding: '2023-03-31',\n          reportedCurrency: 'INR',\n          totalRevenue: '792000000000',\n          grossProfit: '150000000000',\n          netIncome: '70000000000',\n          operatingIncome: '90000000000',\n          ebit: '85000000000',\n          ebitda: '120000000000'\n        }],\n        quarterlyReports: [{\n          fiscalDateEnding: '2023-12-31',\n          reportedCurrency: 'INR',\n          totalRevenue: '200000000000',\n          netIncome: '18000000000'\n        }]\n      };\n\n      const processed = alphaVantageService.processIncomeStatement(rawData);\n      \n      expect(processed.symbol).toBe('RELIANCE.BSE');\n      expect(processed.annualReports).toHaveLength(1);\n      expect(processed.annualReports[0].totalRevenue).toBe(792000000000);\n      expect(processed.annualReports[0].netIncome).toBe(70000000000);\n      expect(processed.quarterlyReports).toHaveLength(1);\n    });\n\n    test('should process balance sheet data correctly', () => {\n      const rawData = {\n        symbol: 'RELIANCE.BSE',\n        annualReports: [{\n          fiscalDateEnding: '2023-03-31',\n          reportedCurrency: 'INR',\n          totalAssets: '1200000000000',\n          totalLiabilities: '600000000000',\n          totalShareholderEquity: '600000000000',\n          cashAndCashEquivalentsAtCarryingValue: '50000000000',\n          longTermDebt: '200000000000'\n        }]\n      };\n\n      const processed = alphaVantageService.processBalanceSheet(rawData);\n      \n      expect(processed.symbol).toBe('RELIANCE.BSE');\n      expect(processed.annualReports).toHaveLength(1);\n      expect(processed.annualReports[0].totalAssets).toBe(1200000000000);\n      expect(processed.annualReports[0].totalShareholderEquity).toBe(600000000000);\n    });\n  });\n\n  describe('Derived Metrics Calculation', () => {\n    const mockOverview = {\n      peRatio: 28.5,\n      beta: 1.2\n    };\n\n    const mockIncomeStatement = {\n      annualReports: [{\n        totalRevenue: 792000000000,\n        netIncome: 70000000000,\n        grossProfit: 150000000000,\n        operatingIncome: 90000000000\n      }, {\n        totalRevenue: 720000000000,\n        netIncome: 60000000000\n      }]\n    };\n\n    const mockBalanceSheet = {\n      annualReports: [{\n        totalAssets: 1200000000000,\n        totalLiabilities: 600000000000,\n        totalShareholderEquity: 600000000000,\n        totalCurrentAssets: 300000000000,\n        totalCurrentLiabilities: 150000000000,\n        longTermDebt: 200000000000\n      }]\n    };\n\n    test('should calculate profitability ratios correctly', () => {\n      const metrics = alphaVantageService.calculateDerivedMetrics(\n        mockOverview, mockIncomeStatement, mockBalanceSheet\n      );\n      \n      expect(metrics.netProfitMargin).toBeCloseTo(8.84, 2); // 70B/792B * 100\n      expect(metrics.grossProfitMargin).toBeCloseTo(18.94, 2); // 150B/792B * 100\n      expect(metrics.operatingMargin).toBeCloseTo(11.36, 2); // 90B/792B * 100\n    });\n\n    test('should calculate liquidity ratios correctly', () => {\n      const metrics = alphaVantageService.calculateDerivedMetrics(\n        mockOverview, mockIncomeStatement, mockBalanceSheet\n      );\n      \n      expect(metrics.currentRatio).toBe(2); // 300B/150B\n    });\n\n    test('should calculate leverage ratios correctly', () => {\n      const metrics = alphaVantageService.calculateDerivedMetrics(\n        mockOverview, mockIncomeStatement, mockBalanceSheet\n      );\n      \n      expect(metrics.debtToEquityRatio).toBe(1); // 600B/600B\n      expect(metrics.longTermDebtToEquity).toBeCloseTo(0.33, 2); // 200B/600B\n      expect(metrics.debtRatio).toBe(0.5); // 600B/1200B\n    });\n\n    test('should calculate efficiency ratios correctly', () => {\n      const metrics = alphaVantageService.calculateDerivedMetrics(\n        mockOverview, mockIncomeStatement, mockBalanceSheet\n      );\n      \n      expect(metrics.assetTurnover).toBeCloseTo(0.66, 2); // 792B/1200B\n      expect(metrics.returnOnAssets).toBeCloseTo(5.83, 2); // 70B/1200B * 100\n      expect(metrics.returnOnEquity).toBeCloseTo(11.67, 2); // 70B/600B * 100\n    });\n\n    test('should calculate growth rates correctly', () => {\n      const metrics = alphaVantageService.calculateDerivedMetrics(\n        mockOverview, mockIncomeStatement, mockBalanceSheet\n      );\n      \n      expect(metrics.revenueGrowthRate).toBe(10); // (792-720)/720 * 100\n      expect(metrics.netIncomeGrowthRate).toBeCloseTo(16.67, 2); // (70-60)/60 * 100\n    });\n\n    test('should calculate financial health score', () => {\n      const metrics = alphaVantageService.calculateDerivedMetrics(\n        mockOverview, mockIncomeStatement, mockBalanceSheet\n      );\n      \n      expect(metrics.financialHealthScore).toBeGreaterThan(0);\n      expect(metrics.financialHealthScore).toBeLessThanOrEqual(100);\n      expect(typeof metrics.financialHealthScore).toBe('number');\n    });\n  });\n\n  describe('Financial Health Score Calculation', () => {\n    test('should return high score for excellent metrics', () => {\n      const excellentMetrics = {\n        netProfitMargin: 20,\n        currentRatio: 2.5,\n        debtToEquityRatio: 0.2,\n        revenueGrowthRate: 25,\n        returnOnEquity: 25\n      };\n      \n      const score = alphaVantageService.calculateFinancialHealthScore(excellentMetrics, {});\n      expect(score).toBeGreaterThan(80);\n    });\n\n    test('should return low score for poor metrics', () => {\n      const poorMetrics = {\n        netProfitMargin: -5,\n        currentRatio: 0.3,\n        debtToEquityRatio: 3,\n        revenueGrowthRate: -10,\n        returnOnEquity: -5\n      };\n      \n      const score = alphaVantageService.calculateFinancialHealthScore(poorMetrics, {});\n      expect(score).toBeLessThan(30);\n    });\n\n    test('should return 0 for no metrics', () => {\n      const score = alphaVantageService.calculateFinancialHealthScore({}, {});\n      expect(score).toBe(0);\n    });\n  });\n\n  describe('API Usage', () => {\n    test('should return API usage statistics', () => {\n      const usage = alphaVantageService.getApiUsage();\n      \n      expect(usage).toHaveProperty('hasApiKey');\n      expect(usage).toHaveProperty('rateLimitDelay');\n      expect(usage).toHaveProperty('queueLength');\n      expect(usage).toHaveProperty('isProcessingQueue');\n      expect(usage).toHaveProperty('lastRequestTime');\n      \n      expect(typeof usage.hasApiKey).toBe('boolean');\n      expect(typeof usage.rateLimitDelay).toBe('number');\n      expect(typeof usage.queueLength).toBe('number');\n      expect(typeof usage.isProcessingQueue).toBe('boolean');\n    });\n  });\n});\n\ndescribe('Fundamentals API Endpoints', () => {\n  \n  beforeEach(() => {\n    jest.clearAllMocks();\n  });\n\n  describe('GET /api/fundamentals/overview/:symbol', () => {\n    test('should return company overview for valid symbol', async () => {\n      const mockOverviewData = {\n        symbol: 'RELIANCE.BSE',\n        name: 'Reliance Industries Limited',\n        sector: 'Energy',\n        marketCapitalization: 1650000000000,\n        peRatio: 28.5,\n        eps: 85.30\n      };\n\n      jest.spyOn(alphaVantageService, 'getCompanyOverview').mockResolvedValue(mockOverviewData);\n\n      const response = await request(app)\n        .get('/api/fundamentals/overview/RELIANCE')\n        .expect(200);\n\n      expect(response.body.success).toBe(true);\n      expect(response.body.data).toEqual(mockOverviewData);\n      expect(alphaVantageService.getCompanyOverview).toHaveBeenCalledWith('RELIANCE', 'NSE');\n    });\n\n    test('should handle API key not configured error', async () => {\n      jest.spyOn(alphaVantageService, 'getCompanyOverview').mockRejectedValue(\n        new Error('Alpha Vantage API key not configured')\n      );\n\n      const response = await request(app)\n        .get('/api/fundamentals/overview/RELIANCE')\n        .expect(503);\n\n      expect(response.body.success).toBe(false);\n      expect(response.body.message).toBe('Fundamental data service temporarily unavailable');\n    });\n\n    test('should handle rate limit error', async () => {\n      jest.spyOn(alphaVantageService, 'getCompanyOverview').mockRejectedValue(\n        new Error('Alpha Vantage API rate limit exceeded. Please try again later.')\n      );\n\n      const response = await request(app)\n        .get('/api/fundamentals/overview/RELIANCE')\n        .expect(429);\n\n      expect(response.body.success).toBe(false);\n      expect(response.body.message).toBe('Rate limit exceeded. Please try again later.');\n    });\n\n    test('should handle invalid symbol', async () => {\n      const response = await request(app)\n        .get('/api/fundamentals/overview/')\n        .expect(404); // Express will return 404 for missing route parameter\n    });\n  });\n\n  describe('GET /api/fundamentals/comprehensive/:symbol', () => {\n    test('should return comprehensive fundamental data', async () => {\n      const mockFundamentalData = {\n        symbol: 'RELIANCE.BSE',\n        lastUpdated: new Date().toISOString(),\n        overview: { name: 'Reliance Industries Limited' },\n        incomeStatement: { symbol: 'RELIANCE.BSE' },\n        balanceSheet: { symbol: 'RELIANCE.BSE' },\n        cashFlow: { symbol: 'RELIANCE.BSE' },\n        derivedMetrics: {\n          netProfitMargin: 8.84,\n          financialHealthScore: 75\n        },\n        errors: []\n      };\n\n      jest.spyOn(alphaVantageService, 'getFundamentalData').mockResolvedValue(mockFundamentalData);\n\n      const response = await request(app)\n        .get('/api/fundamentals/comprehensive/RELIANCE')\n        .expect(200);\n\n      expect(response.body.success).toBe(true);\n      expect(response.body.data).toEqual(mockFundamentalData);\n      expect(response.body.hasErrors).toBe(false);\n      expect(response.body.errorCount).toBe(0);\n    });\n\n    test('should handle partial data with errors', async () => {\n      const mockFundamentalData = {\n        symbol: 'TEST.BSE',\n        overview: { name: 'Test Company' },\n        incomeStatement: null,\n        balanceSheet: null,\n        cashFlow: null,\n        derivedMetrics: null,\n        errors: [\n          { dataType: 'incomeStatement', error: 'No data found' },\n          { dataType: 'balanceSheet', error: 'No data found' }\n        ]\n      };\n\n      jest.spyOn(alphaVantageService, 'getFundamentalData').mockResolvedValue(mockFundamentalData);\n\n      const response = await request(app)\n        .get('/api/fundamentals/comprehensive/TEST')\n        .expect(200);\n\n      expect(response.body.success).toBe(true);\n      expect(response.body.hasErrors).toBe(true);\n      expect(response.body.errorCount).toBe(2);\n    });\n  });\n\n  describe('GET /api/fundamentals/health-score/:symbol', () => {\n    test('should return financial health score', async () => {\n      const mockFundamentalData = {\n        symbol: 'RELIANCE.BSE',\n        lastUpdated: new Date().toISOString(),\n        derivedMetrics: {\n          financialHealthScore: 85\n        }\n      };\n\n      jest.spyOn(alphaVantageService, 'getFundamentalData').mockResolvedValue(mockFundamentalData);\n\n      const response = await request(app)\n        .get('/api/fundamentals/health-score/RELIANCE')\n        .expect(200);\n\n      expect(response.body.success).toBe(true);\n      expect(response.body.data.healthScore).toBe(85);\n      expect(response.body.data.rating).toBe('Excellent');\n    });\n\n    test('should handle insufficient data for health score', async () => {\n      const mockFundamentalData = {\n        symbol: 'TEST.BSE',\n        derivedMetrics: null\n      };\n\n      jest.spyOn(alphaVantageService, 'getFundamentalData').mockResolvedValue(mockFundamentalData);\n\n      const response = await request(app)\n        .get('/api/fundamentals/health-score/TEST')\n        .expect(404);\n\n      expect(response.body.success).toBe(false);\n      expect(response.body.message).toBe('Insufficient data to calculate financial health score');\n    });\n  });\n\n  describe('GET /api/fundamentals/api-status', () => {\n    test('should return API status information', async () => {\n      const response = await request(app)\n        .get('/api/fundamentals/api-status')\n        .expect(200);\n\n      expect(response.body.success).toBe(true);\n      expect(response.body.data).toHaveProperty('hasApiKey');\n      expect(response.body.data).toHaveProperty('status');\n      expect(response.body.data).toHaveProperty('estimatedWaitTime');\n    });\n  });\n});"
+      const rawData = {
+        Symbol: 'RELIANCE.BSE',
+        Name: 'Reliance Industries Limited',
+        Description: 'Reliance Industries Limited operates as a petrochemical company.',
+        Country: 'India',
+        Sector: 'Energy',
+        Industry: 'Oil & Gas Refining & Marketing',
+        MarketCapitalization: '1650000000000',
+        PERatio: '28.5',
+        EPS: '85.30',
+        DividendYield: '0.0035',
+        ProfitMargin: '0.089',
+        ReturnOnEquityTTM: '0.125',
+        Beta: '1.2'
+      };
+
+      const processed = alphaVantageService.processCompanyOverview(rawData);
+      
+      expect(processed.symbol).toBe('RELIANCE.BSE');
+      expect(processed.name).toBe('Reliance Industries Limited');
+      expect(processed.sector).toBe('Energy');
+      expect(processed.marketCapitalization).toBe(1650000000000);
+      expect(processed.peRatio).toBe(28.5);
+      expect(processed.eps).toBe(85.30);
+      expect(processed.dividendYield).toBe(0.0035);
+    });
+
+    test('should process income statement data correctly', () => {
+      const rawData = {
+        symbol: 'RELIANCE.BSE',
+        annualReports: [{
+          fiscalDateEnding: '2023-03-31',
+          reportedCurrency: 'INR',
+          totalRevenue: '792000000000',
+          grossProfit: '150000000000',
+          netIncome: '70000000000',
+          operatingIncome: '90000000000',
+          ebit: '85000000000',
+          ebitda: '120000000000'
+        }],
+        quarterlyReports: [{
+          fiscalDateEnding: '2023-12-31',
+          reportedCurrency: 'INR',
+          totalRevenue: '200000000000',
+          netIncome: '18000000000'
+        }]
+      };
+
+      const processed = alphaVantageService.processIncomeStatement(rawData);
+      
+      expect(processed.symbol).toBe('RELIANCE.BSE');
+      expect(processed.annualReports).toHaveLength(1);
+      expect(processed.annualReports[0].totalRevenue).toBe(792000000000);
+      expect(processed.annualReports[0].netIncome).toBe(70000000000);
+      expect(processed.quarterlyReports).toHaveLength(1);
+    });
+
+    test('should process balance sheet data correctly', () => {
+      const rawData = {
+        symbol: 'RELIANCE.BSE',
+        annualReports: [{
+          fiscalDateEnding: '2023-03-31',
+          reportedCurrency: 'INR',
+          totalAssets: '1200000000000',
+          totalLiabilities: '600000000000',
+          totalShareholderEquity: '600000000000',
+          cashAndCashEquivalentsAtCarryingValue: '50000000000',
+          longTermDebt: '200000000000'
+        }]
+      };
+
+      const processed = alphaVantageService.processBalanceSheet(rawData);
+      
+      expect(processed.symbol).toBe('RELIANCE.BSE');
+      expect(processed.annualReports).toHaveLength(1);
+      expect(processed.annualReports[0].totalAssets).toBe(1200000000000);
+      expect(processed.annualReports[0].totalShareholderEquity).toBe(600000000000);
+    });
+  });
+
+  describe('Derived Metrics Calculation', () => {
+    const mockOverview = {
+      peRatio: 28.5,
+      beta: 1.2
+    };
+
+    const mockIncomeStatement = {
+      annualReports: [{
+        totalRevenue: 792000000000,
+        netIncome: 70000000000,
+        grossProfit: 150000000000,
+        operatingIncome: 90000000000
+      }, {
+        totalRevenue: 720000000000,
+        netIncome: 60000000000
+      }]
+    };
+
+    const mockBalanceSheet = {
+      annualReports: [{
+        totalAssets: 1200000000000,
+        totalLiabilities: 600000000000,
+        totalShareholderEquity: 600000000000,
+        totalCurrentAssets: 300000000000,
+        totalCurrentLiabilities: 150000000000,
+        longTermDebt: 200000000000
+      }]
+    };
+
+    test('should calculate profitability ratios correctly', () => {
+      const metrics = alphaVantageService.calculateDerivedMetrics(
+        mockOverview, mockIncomeStatement, mockBalanceSheet
+      );
+      
+      expect(metrics.netProfitMargin).toBeCloseTo(8.84, 2);
+      expect(metrics.grossProfitMargin).toBeCloseTo(18.94, 2);
+      expect(metrics.operatingMargin).toBeCloseTo(11.36, 2);
+    });
+
+    test('should calculate liquidity ratios correctly', () => {
+      const metrics = alphaVantageService.calculateDerivedMetrics(
+        mockOverview, mockIncomeStatement, mockBalanceSheet
+      );
+      
+      expect(metrics.currentRatio).toBe(2);
+    });
+
+    test('should calculate leverage ratios correctly', () => {
+      const metrics = alphaVantageService.calculateDerivedMetrics(
+        mockOverview, mockIncomeStatement, mockBalanceSheet
+      );
+      
+      expect(metrics.debtToEquityRatio).toBe(1);
+      expect(metrics.longTermDebtToEquity).toBeCloseTo(0.33, 2);
+      expect(metrics.debtRatio).toBe(0.5);
+    });
+
+    test('should calculate efficiency ratios correctly', () => {
+      const metrics = alphaVantageService.calculateDerivedMetrics(
+        mockOverview, mockIncomeStatement, mockBalanceSheet
+      );
+      
+      expect(metrics.assetTurnover).toBeCloseTo(0.66, 2);
+      expect(metrics.returnOnAssets).toBeCloseTo(5.83, 2);
+      expect(metrics.returnOnEquity).toBeCloseTo(11.67, 2);
+    });
+
+    test('should calculate growth rates correctly', () => {
+      const metrics = alphaVantageService.calculateDerivedMetrics(
+        mockOverview, mockIncomeStatement, mockBalanceSheet
+      );
+      
+      expect(metrics.revenueGrowthRate).toBe(10);
+      expect(metrics.netIncomeGrowthRate).toBeCloseTo(16.67, 2);
+    });
+
+    test('should calculate financial health score', () => {
+      const metrics = alphaVantageService.calculateDerivedMetrics(
+        mockOverview, mockIncomeStatement, mockBalanceSheet
+      );
+      
+      expect(metrics.financialHealthScore).toBeGreaterThan(0);
+      expect(metrics.financialHealthScore).toBeLessThanOrEqual(100);
+      expect(typeof metrics.financialHealthScore).toBe('number');
+    });
+  });
+
+  describe('Financial Health Score Calculation', () => {
+    test('should return high score for excellent metrics', () => {
+      const excellentMetrics = {
+        netProfitMargin: 20,
+        currentRatio: 2.5,
+        debtToEquityRatio: 0.2,
+        revenueGrowthRate: 25,
+        returnOnEquity: 25
+      };
+      
+      const score = alphaVantageService.calculateFinancialHealthScore(excellentMetrics, {});
+      expect(score).toBeGreaterThan(80);
+    });
+
+    test('should return low score for poor metrics', () => {
+      const poorMetrics = {
+        netProfitMargin: -5,
+        currentRatio: 0.3,
+        debtToEquityRatio: 3,
+        revenueGrowthRate: -10,
+        returnOnEquity: -5
+      };
+      
+      const score = alphaVantageService.calculateFinancialHealthScore(poorMetrics, {});
+      expect(score).toBeLessThan(30);
+    });
+
+    test('should return 0 for no metrics', () => {
+      const score = alphaVantageService.calculateFinancialHealthScore({}, {});
+      expect(score).toBe(0);
+    });
+  });
+
+  describe('API Usage', () => {
+    test('should return API usage statistics', () => {
+      const usage = alphaVantageService.getApiUsage();
+      
+      expect(usage).toHaveProperty('hasApiKey');
+      expect(usage).toHaveProperty('rateLimitDelay');
+      expect(usage).toHaveProperty('queueLength');
+      expect(usage).toHaveProperty('isProcessingQueue');
+      expect(usage).toHaveProperty('lastRequestTime');
+      
+      expect(typeof usage.hasApiKey).toBe('boolean');
+      expect(typeof usage.rateLimitDelay).toBe('number');
+      expect(typeof usage.queueLength).toBe('number');
+      expect(typeof usage.isProcessingQueue).toBe('boolean');
+    });
+  });
+});

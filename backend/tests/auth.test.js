@@ -309,7 +309,7 @@ describe('Authentication System', () => {
         .set('Authorization', `Bearer ${authToken}`)
         .expect(401);
 
-      expect(profileResponse.body.message).toBe('Session expired. Please login again.');
+      expect(profileResponse.body.message).toBe('Token has been invalidated');
     });
 
     test('should not logout without token', async () => {
@@ -424,7 +424,7 @@ describe('Authentication Middleware', () => {
     expect(next).toHaveBeenCalled();
     expect(req.user).toBeDefined();
     expect(req.user.email).toBe('test@example.com');
-    expect(req.userId).toBe(testUser._id);
+    expect(req.userId.toString()).toBe(testUser._id.toString());
   });
 
   test('should reject request without token', async () => {

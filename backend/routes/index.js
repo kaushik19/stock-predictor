@@ -3,6 +3,8 @@ const authRoutes = require('./auth');
 const stockRoutes = require('./stocks');
 const fundamentalRoutes = require('./fundamentals');
 const newsRoutes = require('./news');
+const recommendationRoutes = require('./recommendations');
+const stockQualityRoutes = require('./stockQuality');
 const router = express.Router();
 
 /**
@@ -80,6 +82,7 @@ router.get('/', (req, res) => {
       fundamentals: '/api/fundamentals',
       news: '/api/news',
       recommendations: '/api/recommendations',
+      stockQuality: '/api/stock-quality',
       portfolio: '/api/portfolio',
       watchlist: '/api/watchlist'
     },
@@ -167,5 +170,11 @@ router.use('/fundamentals', fundamentalRoutes);
 
 // Mount news and sentiment routes
 router.use('/news', newsRoutes);
+
+// Mount recommendation routes
+router.use('/recommendations', recommendationRoutes);
+
+// Mount stock quality routes
+router.use('/stock-quality', stockQualityRoutes);
 
 module.exports = router;

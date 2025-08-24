@@ -1,6 +1,7 @@
 const express = require('express');
 const Joi = require('joi');
 const YahooFinanceService = require('../services/yahooFinanceService');
+const technicalAnalysisService = require('../services/technicalAnalysisService');
 const { authenticate, optionalAuth } = require('../middleware/auth');
 const { logger } = require('../middleware/errorHandler');
 
@@ -34,6 +35,12 @@ const searchSchema = Joi.object({
     'any.required': 'Search query is required'
   }),
   limit: Joi.number().integer().min(1).max(50).default(10)
+});
+
+const technicalAnalysisSchema = Joi.object({
+  symbol: Joi.string().required(),
+  period: Joi.string().valid('1mo', '3mo', '6mo', '1y', '2y').default('3mo'),
+  exchange: Joi.string().valid('NSE', 'BSE').default('NSE')
 });
 
 /**
@@ -588,6 +595,203 @@ router.get('/indices', optionalAuth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch indices data'
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/stocks/technical-analysis/{symbol}:
+ *   get:
+ *     summary: Get comprehensive technical analysis
+ *     description: Get detailed technical analysis including RSI, MACD, moving averages, support/resistance levels, volume analysis, and momentum indicators
+ *     tags: [Stocks]
+ *     parameters:
+ *       - in: path
+ *         name: symbol
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Stock symbol (e.g., RELIANCE, TCS)
+ *         example: RELIANCE
+ *       - in: query
+ *         name: period
+ *         schema:
+ *           type: string
+ *           enum: [1mo, 3mo, 6mo, 1y, 2y]
+ *           default: 3mo
+ *         description: Time period for analysis
+ *       - in: query
+ *         name: exchange
+ *         schema:
+ *           type: string
+ *           enum: [NSE, BSE]
+ *           default: NSE
+ *         description: Exchange (NSE or BSE)
+ *     responses:
+ *       200:
+ *         description: Technical analysis retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     symbol:
+ *                       type: string
+ *                     period:
+ *                       type: string
+ *                     lastUpdated:
+ *                       type: string
+ *                       format: date-time
+ *                     indicators:
+ *                       type: object
+ *                       properties:
+ *                         rsi:
+ *                           type: object
+ *                           properties:
+ *                             current:
+ *                               type: number
+ *                             signal:
+ *                               type: string
+ *                         macd:
+ *                           type: object
+ *                           properties:
+ *                             macdLine:
+ *                               type: number
+ *                             signalLine:
+ *                               type: number
+ *                             histogram:
+ *                               type: number
+ *                             signal:
+ *                               type: string
+ *                         movingAverages:
+ *                           type: object
+ *                           properties:
+ *                             sma20:
+ *                               type: object
+ *                             sma50:
+ *                               type: object
+ *                             sma200:
+ *                               type: object
+ *                             ema12:
+ *                               type: object
+ *                             ema26:
+ *                               type: object
+ *                         bollingerBands:
+ *                           type: object
+ *                           properties:
+ *                             upperBand:
+ *                               type: number
+ *                             middleBand:
+ *                               type: number
+ *                             lowerBand:
+ *                               type: number
+ *                             signal:
+ *                               type: string
+ *                         supportResistance:
+ *                           type: object
+ *                           properties:
+ *                             support:
+ *                               type: array
+ *                               items:
+ *                                 type: number
+ *                             resistance:
+ *                               type: array
+ *                               items:
+ *                                 type: number
+ *                             signal:
+ *                               type: string
+ *                         volumeAnalysis:
+ *                           type: object
+ *                           properties:
+ *                             averageVolume:
+ *                               type: number
+ *                             currentVolume:
+ *                               type: number
+ *                             volumeRatio:
+ *                               type: number
+ *                             volumeTrend:
+ *                               type: string
+ *                             signal:
+ *                               type: string
+ *                         momentum:
+ *                           type: object
+ *                           properties:
+ *                             rateOfChange:
+ *                               type: number
+ *                             stochastic:
+ *                               type: object
+ *                             williamsR:
+ *                               type: object
+ *                             cci:
+ *                               type: object
+ *                     signals:
+ *                       type: object
+ *                       properties:
+ *                         overall:
+ *                           type: string
+ *                         strength:
+ *                           type: number
+ *                         recommendation:
+ *                           type: string
+ *       400:
+ *         description: Invalid parameters
+ *       404:
+ *         description: Stock not found or insufficient data
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/technical-analysis/:symbol', optionalAuth, async (req, res) => {
+  try {
+    const { error, value } = technicalAnalysisSchema.validate({
+      symbol: req.params.symbol,
+      period: req.query.period,
+      exchange: req.query.exchange
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: error.details.map(detail => detail.message)
+      });
+    }
+
+    const { symbol, period, exchange } = value;
+    const analysis = await technicalAnalysisService.getComprehensiveTechnicalAnalysis(symbol, period, exchange);
+
+    res.status(200).json({
+      success: true,
+      data: analysis
+    });
+
+  } catch (error) {
+    logger.error(`Failed to get technical analysis for ${req.params.symbol}:`, error);
+    
+    if (error.message.includes('Insufficient historical data')) {
+      return res.status(404).json({
+        success: false,
+        message: 'Insufficient historical data for technical analysis',
+        symbol: req.params.symbol
+      });
+    }
+
+    if (error.message.includes('No historical data found')) {
+      return res.status(404).json({
+        success: false,
+        message: 'Stock not found or no data available',
+        symbol: req.params.symbol
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to perform technical analysis'
     });
   }
 });
